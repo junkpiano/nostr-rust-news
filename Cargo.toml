@@ -24,7 +24,3 @@ pre-build = [
 
 [dev-dependencies]
 serde_json = "1"
-
-# Patch native-tls to avoid TLSv1.3 compilation error
-[patch.crates-io]
-native-tls = { version = "0.2.11" }
