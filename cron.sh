@@ -84,7 +84,7 @@ if [ ! -x "$bin_path" ] || [ ! -f "$tag_file" ] || [ "$(cat "$tag_file")" != "$l
       chmod +x "$bin_path"
       printf '%s' "$latest_tag" > "$tag_file"
       rm -rf "$tmp_dir"
-      exec "$bin_path"
+      exec "$bin_path" "$@"
       ;;
   esac
 
@@ -105,4 +105,4 @@ if [ ! -x "$bin_path" ] || [ ! -f "$tag_file" ] || [ "$(cat "$tag_file")" != "$l
   rm -rf "$tmp_dir"
 fi
 
-exec "$bin_path"
+exec "$bin_path" "$@"
