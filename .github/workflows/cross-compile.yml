@@ -19,9 +19,9 @@ jobs:
             rust_target: x86_64-unknown-linux-gnu
           - runs_on: ubuntu-24.04-arm
             rust_target: aarch64-unknown-linux-gnu
-          - runs_on: macos-13
+          - runs_on: macos-15-intel
             rust_target: x86_64-apple-darwin
-          - runs_on: macos-14
+          - runs_on: macos-latest
             rust_target: aarch64-apple-darwin
     runs-on: ${{ matrix.runs_on }}
     steps:
@@ -36,6 +36,9 @@ jobs:
       - name: Install native build deps
         if: startsWith(matrix.runs_on, 'ubuntu')
         run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.rust_target }}
 
       - name: Build and package
         shell: bash
