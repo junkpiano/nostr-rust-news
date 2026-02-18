@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 
 pub struct RedditClient {
     http: reqwest::Client,
@@ -19,6 +19,7 @@ pub struct RedditPost {
 impl RedditClient {
     pub fn new() -> Result<Self> {
         let http = reqwest::Client::builder()
+            .http1_only()
             .user_agent(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
                  (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
@@ -34,14 +35,22 @@ impl RedditClient {
 
     pub async fn fetch_subreddit_posts(&self, subreddit: &str) -> Result<Vec<RedditPost>> {
         let url = format!("https://www.reddit.com/r/{subreddit}.json");
-        let listing: RedditListing = self
+        let response = self
             .http
-            .get(url)
+            .get(&url)
             .send()
             .await
-            .context("request subreddit listing")?
-            .error_for_status()
-            .context("subreddit listing returned error status")?
+            .context("request subreddit listing")?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response
+                .text()
+                .await
+                .context("read subreddit listing response body")?;
+            let body_head: String = body.chars().take(200).collect();
+            bail!("subreddit listing returned status={status} body_head={body_head:?}");
+        }
+        let listing: RedditListing = response
             .json()
             .await
             .context("parse subreddit listing json")?;
