@@ -19,7 +19,10 @@ pub struct RedditPost {
 impl RedditClient {
     pub fn new() -> Result<Self> {
         let http = reqwest::Client::builder()
-            .user_agent("nostr-rust-news/0.1 (https://www.reddit.com/r/rust.json)")
+            .user_agent(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+                 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+            )
             .build()
             .context("build reqwest client")?;
         Ok(Self { http })
