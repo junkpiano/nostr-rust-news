@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 pub struct RedditClient {
     http: reqwest::Client,
@@ -10,9 +11,6 @@ pub struct RedditPost {
     pub title: String,
     pub author: String,
     pub permalink: String,
-    pub url: String,
-    pub score: i64,
-    pub num_comments: i64,
     pub created_utc: f64,
 }
 
@@ -34,76 +32,110 @@ impl RedditClient {
     }
 
     pub async fn fetch_subreddit_posts(&self, subreddit: &str) -> Result<Vec<RedditPost>> {
-        let url = format!("https://www.reddit.com/r/{subreddit}.json");
+        // The unauthenticated .json listing endpoints now return 403, so we
+        // consume the Atom feed instead.
+        let url = format!("https://www.reddit.com/r/{subreddit}/.rss");
         let response = self
             .http
             .get(&url)
             .send()
             .await
-            .context("request subreddit listing")?;
+            .context("request subreddit feed")?;
         let status = response.status();
-        if !status.is_success() {
-            let body = response
-                .text()
-                .await
-                .context("read subreddit listing response body")?;
-            let body_head: String = body.chars().take(200).collect();
-            bail!("subreddit listing returned status={status} body_head={body_head:?}");
-        }
-        let listing: RedditListing = response
-            .json()
+        let body = response
+            .text()
             .await
-            .context("parse subreddit listing json")?;
+            .context("read subreddit feed response body")?;
+        if !status.is_success() {
+            let body_head: String = body.chars().take(200).collect();
+            bail!("subreddit feed returned status={status} body_head={body_head:?}");
+        }
 
-        let posts = listing
-            .data
-            .children
-            .into_iter()
-            .map(|child| child.data.into())
-            .collect();
-
-        Ok(posts)
+        parse_atom_feed(&body)
     }
 }
 
-#[derive(serde::Deserialize)]
-struct RedditListing {
-    data: RedditListingData,
+fn parse_atom_feed(xml: &str) -> Result<Vec<RedditPost>> {
+    let feed: AtomFeed = quick_xml::de::from_str(xml).context("parse subreddit atom feed")?;
+
+    feed.entries
+        .into_iter()
+        .map(|entry| {
+            let created_utc = OffsetDateTime::parse(&entry.published, &Rfc3339)
+                .with_context(|| format!("parse published timestamp {:?}", entry.published))?
+                .unix_timestamp() as f64;
+            let author = entry
+                .author
+                .map(|a| a.name.trim_start_matches("/u/").to_string())
+                .unwrap_or_else(|| "[deleted]".to_string());
+            Ok(RedditPost {
+                id: entry.id,
+                title: entry.title,
+                author,
+                permalink: entry.link.href,
+                created_utc,
+            })
+        })
+        .collect()
 }
 
 #[derive(serde::Deserialize)]
-struct RedditListingData {
-    children: Vec<RedditChild>,
+struct AtomFeed {
+    #[serde(rename = "entry", default)]
+    entries: Vec<AtomEntry>,
 }
 
 #[derive(serde::Deserialize)]
-struct RedditChild {
-    data: RedditPostData,
-}
-
-#[derive(serde::Deserialize)]
-struct RedditPostData {
+struct AtomEntry {
     id: String,
     title: String,
-    author: String,
-    permalink: String,
-    url: String,
-    score: i64,
-    num_comments: i64,
-    created_utc: f64,
+    author: Option<AtomAuthor>,
+    link: AtomLink,
+    published: String,
 }
 
-impl From<RedditPostData> for RedditPost {
-    fn from(value: RedditPostData) -> Self {
-        Self {
-            id: value.id,
-            title: value.title,
-            author: value.author,
-            permalink: value.permalink,
-            url: value.url,
-            score: value.score,
-            num_comments: value.num_comments,
-            created_utc: value.created_utc,
-        }
+#[derive(serde::Deserialize)]
+struct AtomAuthor {
+    name: String,
+}
+
+#[derive(serde::Deserialize)]
+struct AtomLink {
+    #[serde(rename = "@href")]
+    href: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_atom_feed;
+
+    #[test]
+    fn parses_reddit_atom_feed() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Rust</title>
+  <entry>
+    <author><name>/u/testuser</name><uri>https://www.reddit.com/user/testuser</uri></author>
+    <category term="rust" label="r/rust"/>
+    <content type="html">&lt;p&gt;body&lt;/p&gt;</content>
+    <id>t3_abc123</id>
+    <link href="https://www.reddit.com/r/rust/comments/abc123/test_post/"/>
+    <updated>2026-06-29T11:04:08+00:00</updated>
+    <published>2026-06-29T11:04:08+00:00</published>
+    <title>Test Post</title>
+  </entry>
+</feed>"#;
+
+        let posts = parse_atom_feed(xml).expect("feed should parse");
+        assert_eq!(posts.len(), 1);
+        let post = &posts[0];
+        assert_eq!(post.id, "t3_abc123");
+        assert_eq!(post.title, "Test Post");
+        assert_eq!(post.author, "testuser");
+        assert_eq!(
+            post.permalink,
+            "https://www.reddit.com/r/rust/comments/abc123/test_post/"
+        );
+        assert_eq!(post.created_utc, 1782731048.0);
     }
 }

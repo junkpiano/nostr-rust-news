@@ -33,10 +33,9 @@ async fn main() -> Result<()> {
         let posts = client.fetch_rust_posts().await?;
 
         for post in posts.into_iter().filter(|p| p.created_utc >= cutoff) {
-            let permalink = format!("https://www.reddit.com{}", post.permalink);
             let text = format!(
-                "{}\n{}\n\nr/rust by u/{} • score {} • comments {}\n{}",
-                post.title, post.url, post.author, post.score, post.num_comments, permalink
+                "{}\n\nr/rust by u/{}\n{}",
+                post.title, post.author, post.permalink
             );
 
             if dry_run {

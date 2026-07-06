@@ -6,9 +6,11 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 dist = { git = "https://github.com/junkpiano/Dist.git", package = "dist", default-features = false }
+quick-xml = { version = "0.37", features = ["serialize"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
 scraper = "0.22"
 serde = { version = "1", features = ["derive"] }
+time = { version = "0.3", features = ["parsing"] }
 tokio = { version = "1", features = ["full"] }
 
 [package.metadata.cross.target.x86_64-unknown-linux-gnu]
