@@ -22,3 +22,14 @@ fn test_reddit_post_structure() {
     assert_eq!(post.author, "test_user");
     assert_eq!(post.created_utc, 1234567890.0);
 }
+
+#[test]
+fn notes_carry_the_rust_hashtags() {
+    use nostr_rust_news::nostr::{note, HASHTAGS};
+    use nostr_sdk::prelude::*;
+
+    let event = note("Hello").sign_with_keys(&Keys::generate()).unwrap();
+    let tags: Vec<String> = event.tags.hashtags().map(|t| t.to_string()).collect();
+    assert_eq!(tags, HASHTAGS);
+    assert!(event.content.ends_with("\n\n#rust #rustlang"));
+}
