@@ -1,5 +1,9 @@
 use anyhow::{Context, Result};
-use nostr_rust_news::{client::RedditClient, github::GitHubClient, nostr::post_nostr};
+use nostr_rust_news::{
+    client::RedditClient,
+    github::GitHubClient,
+    nostr::{post_nostr, publish_relay_list},
+};
 use std::env;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -22,6 +26,13 @@ async fn main() -> Result<()> {
         .collect();
     if relays.is_empty() {
         anyhow::bail!("NOSTR_RELAYS must contain at least one relay URL");
+    }
+
+    // One-off: tell clients which relays this account posts to (NIP-65), then exit.
+    if args.iter().any(|arg| arg == "--publish-relay-list") {
+        let event_id = publish_relay_list(&nsec, &relays).await?;
+        println!("published relay list ({} relays) ({})", relays.len(), event_id);
+        return Ok(());
     }
 
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64();
