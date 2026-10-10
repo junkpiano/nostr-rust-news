@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use nostr_rust_news::{
+    blog,
     client::RedditClient,
     github::GitHubClient,
     nostr::{post_nostr, publish_relay_list},
@@ -11,11 +12,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 async fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
     let dry_run = args.iter().any(|arg| arg == "--dry-run");
-    let reddit_only = args.iter().any(|arg| arg == "--reddit");
-    let github_only = args.iter().any(|arg| arg == "--github");
-
-    let fetch_reddit = !github_only;
-    let fetch_github = !reddit_only;
+    // Each flag picks a source; with none, all sources run.
+    let flag = |name: &str| args.iter().any(|arg| arg == name);
+    let any_source = flag("--reddit") || flag("--github") || flag("--blog");
+    let fetch_reddit = flag("--reddit") || !any_source;
+    let fetch_github = flag("--github") || !any_source;
+    let fetch_blog = flag("--blog") || !any_source;
 
     let nsec = env::var("NOSTR_NSEC").context("NOSTR_NSEC is required")?;
     let relays: Vec<String> = env::var("NOSTR_RELAYS")
@@ -31,7 +33,11 @@ async fn main() -> Result<()> {
     // One-off: tell clients which relays this account posts to (NIP-65), then exit.
     if args.iter().any(|arg| arg == "--publish-relay-list") {
         let event_id = publish_relay_list(&nsec, &relays).await?;
-        println!("published relay list ({} relays) ({})", relays.len(), event_id);
+        println!(
+            "published relay list ({} relays) ({})",
+            relays.len(),
+            event_id
+        );
         return Ok(());
     }
 
@@ -66,7 +72,8 @@ async fn main() -> Result<()> {
 
         for repo in repos.into_iter() {
             // Parse stars_today to check if >= 100
-            let stars_today_num = repo.stars_today
+            let stars_today_num = repo
+                .stars_today
                 .split_whitespace()
                 .next()
                 .and_then(|s| s.replace(",", "").parse::<i32>().ok())
@@ -89,11 +96,55 @@ async fn main() -> Result<()> {
             );
 
             if dry_run {
-                println!("dry-run [GitHub]: {}/{} ({} stars today)", repo.author, repo.name, stars_today_num);
+                println!(
+                    "dry-run [GitHub]: {}/{} ({} stars today)",
+                    repo.author, repo.name, stars_today_num
+                );
                 println!("{}\n", text);
             } else {
                 let event_id = post_nostr(&nsec, &relays, &text).await?;
-                println!("posted [GitHub]: {}/{} ({} stars today) ({})", repo.author, repo.name, stars_today_num, event_id);
+                println!(
+                    "posted [GitHub]: {}/{} ({} stars today) ({})",
+                    repo.author, repo.name, stars_today_num, event_id
+                );
+            }
+        }
+    }
+
+    // Post new entries from the Rust blogs
+    if fetch_blog {
+        for source in blog::BLOGS {
+            let posts = blog::fetch(source).await?;
+            let path = blog::seen_path(source);
+            match blog::load_seen(&path)? {
+                None if dry_run => println!(
+                    "dry-run [{}]: first run, would remember {} existing posts",
+                    source.label,
+                    posts.len()
+                ),
+                None => {
+                    // First run: remember what's already there instead of posting old announcements.
+                    let ids: Vec<&str> = posts.iter().map(|p| p.id.as_str()).collect();
+                    blog::remember(&path, &ids)?;
+                    println!(
+                        "first run [{}]: remembered {} existing posts",
+                        source.label,
+                        posts.len()
+                    );
+                }
+                Some(seen) => {
+                    for post in blog::unseen(&posts, &seen) {
+                        let text = format!("📰 {}\n\n{}\n{}", source.label, post.title, post.url);
+                        if dry_run {
+                            println!("dry-run [{}]: {}", source.label, post.title);
+                            println!("{}\n", text);
+                        } else {
+                            let event_id = post_nostr(&nsec, &relays, &text).await?;
+                            blog::remember(&path, &[post.id.as_str()])?;
+                            println!("posted [{}]: {} ({})", source.label, post.title, event_id);
+                        }
+                    }
+                }
             }
         }
     }
