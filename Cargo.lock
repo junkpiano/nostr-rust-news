@@ -985,7 +985,7 @@ dependencies = [
 
 [[package]]
 name = "nostr-rust-news"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "nostr-sdk",
